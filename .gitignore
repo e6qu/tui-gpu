@@ -1,0 +1,20 @@
+# Generated/build artifacts
+/target/
+/dist/
+/.cache/
+/tmp/
+
+# Editor/OS
+.DS_Store
+.idea/
+.vscode/
+
+# Third-party source checkouts (read-only refs)
+/third_party/
+
+# Logs and traces
+*.log
+*.trace
+
+# Misc
+/node_modules/
