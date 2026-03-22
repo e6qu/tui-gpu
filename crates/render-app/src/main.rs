@@ -158,11 +158,12 @@ impl State {
             })
             .await
             .context("request adapter")?;
+        let features = wgpu::Features::POLYGON_MODE_LINE;
         let (device, queue) = adapter
             .request_device(
                 &wgpu::DeviceDescriptor {
                     label: Some("render-device"),
-                    required_features: wgpu::Features::empty(),
+                    required_features: features,
                     required_limits: wgpu::Limits::default(),
                 },
                 None,
