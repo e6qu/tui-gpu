@@ -13,3 +13,10 @@
 - `event::Notify` and `Notifier`: implement this to forward OSC/clipboard requests and PTY writes.
 - `event::EventListener` (`EventProxy`): implement to receive terminal events (Wakeup, Bell, etc.) and trigger renderer redraws.
 - `event_loop::State` uses `vte::ansi::Processor` to parse PTY bytes and apply to `Term`; we can adapt this to feed our `Term` without adopting the full event loop.
+
+### Key APIs for Integration
+- `Term::renderable_content()` exposes an iterator over visible lines/cells for rendering.
+- `Term::grid()` gives raw access to the active grid if custom traversal is needed.
+- `event::Notify` and `Notifier`: implement this to forward OSC/clipboard requests and PTY writes.
+- `event::EventListener` (`EventProxy`): implement to receive terminal events (Wakeup, Bell, etc.) and trigger renderer redraws.
+- `event_loop::State` uses `vte::ansi::Processor` to parse PTY bytes and apply to `Term`; we can adapt this to feed our `Term` without adopting the full event loop.
