@@ -1,10 +1,10 @@
 use std::sync::Arc;
 
 use anyhow::Result;
+mod layout;
 use layout::LayoutDocument;
 use log::info;
 use wgpu::util::DeviceExt;
-mod layout;
 
 use winit::{
     event::{ElementState, Event, KeyEvent, WindowEvent},
@@ -13,47 +13,28 @@ use winit::{
     window::WindowBuilder,
 };
 
-const GRID_COLUMNS: u32 = 20;
-const GRID_ROWS: u32 = 12;
+const MENU_BAR_HEIGHT: f32 = 48.0;
+const OVERLAY_HEIGHT: f32 = 32.0;
 const LAYOUT_PATH: &str = "generated/layouts/main_screen.json";
 
 #[repr(C)]
 #[derive(Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
 struct Vertex {
     position: [f32; 2],
+    color: [f32; 3],
 }
 
 impl Vertex {
+    const ATTRIBUTES: [wgpu::VertexAttribute; 2] =
+        wgpu::vertex_attr_array![0 => Float32x2, 1 => Float32x3];
     fn desc<'a>() -> wgpu::VertexBufferLayout<'a> {
         use std::mem;
         wgpu::VertexBufferLayout {
             array_stride: mem::size_of::<Vertex>() as wgpu::BufferAddress,
             step_mode: wgpu::VertexStepMode::Vertex,
-            attributes: &wgpu::vertex_attr_array![0 => Float32x2],
+            attributes: &Self::ATTRIBUTES,
         }
     }
-}
-
-fn build_grid_vertices(columns: u32, rows: u32) -> Vec<Vertex> {
-    let mut vertices = Vec::with_capacity(((columns + rows + 2) * 2) as usize);
-
-    for col in 0..=columns {
-        let x = -1.0 + 2.0 * (col as f32) / (columns as f32);
-        vertices.push(Vertex {
-            position: [x, -1.0],
-        });
-        vertices.push(Vertex { position: [x, 1.0] });
-    }
-
-    for row in 0..=rows {
-        let y = -1.0 + 2.0 * (row as f32) / (rows as f32);
-        vertices.push(Vertex {
-            position: [-1.0, y],
-        });
-        vertices.push(Vertex { position: [1.0, y] });
-    }
-
-    vertices
 }
 
 struct State {
@@ -62,8 +43,6 @@ struct State {
     queue: wgpu::Queue,
     config: wgpu::SurfaceConfiguration,
     pipeline: wgpu::RenderPipeline,
-    vertex_buffer: wgpu::Buffer,
-    vertex_count: u32,
     layout: LayoutDocument,
 }
 
@@ -155,21 +134,12 @@ impl State {
             multiview: None,
         });
 
-        let vertices = build_grid_vertices(GRID_COLUMNS, GRID_ROWS);
-        let vertex_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("grid-vertices"),
-            contents: bytemuck::cast_slice(&vertices),
-            usage: wgpu::BufferUsages::VERTEX,
-        });
-
         Ok(Self {
             surface,
             device,
             queue,
             config,
             pipeline,
-            vertex_buffer,
-            vertex_count: vertices.len() as u32,
             layout,
         })
     }
@@ -184,6 +154,17 @@ impl State {
     }
 
     fn render(&mut self) -> Result<(), wgpu::SurfaceError> {
+        let window_width = self.config.width.max(1) as f32;
+        let window_height = self.config.height.max(1) as f32;
+        let vertices = build_layout_vertices(&self.layout, window_width, window_height);
+        let vertex_buffer = self
+            .device
+            .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                label: Some("layout-vertices"),
+                contents: bytemuck::cast_slice(&vertices),
+                usage: wgpu::BufferUsages::VERTEX,
+            });
+
         let output = self.surface.get_current_texture()?;
         let view = output
             .texture
@@ -215,8 +196,8 @@ impl State {
                 timestamp_writes: None,
             });
             render_pass.set_pipeline(&self.pipeline);
-            render_pass.set_vertex_buffer(0, self.vertex_buffer.slice(..));
-            render_pass.draw(0..self.vertex_count, 0..1);
+            render_pass.set_vertex_buffer(0, vertex_buffer.slice(..));
+            render_pass.draw(0..vertices.len() as u32, 0..1);
         }
 
         self.queue.submit(Some(encoder.finish()));
@@ -283,18 +264,111 @@ fn load_layout() -> Result<LayoutDocument> {
     Ok(doc)
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
+fn build_layout_vertices(doc: &LayoutDocument, width: f32, height: f32) -> Vec<Vertex> {
+    let mut vertices = Vec::new();
+    let mut top_offset = 0.0;
+    let mut bottom_offset = 0.0;
 
-    #[test]
-    fn grid_builder_generates_expected_counts() {
-        let cols = 4;
-        let rows = 2;
-        let vertices = build_grid_vertices(cols, rows);
-        let expected = ((cols + 1) + (rows + 1)) * 2;
-        assert_eq!(vertices.len() as u32, expected);
-        assert_eq!(vertices.first().unwrap().position, [-1.0, -1.0]);
-        assert_eq!(vertices.last().unwrap().position, [1.0, 1.0]);
+    let mut menu_nodes = Vec::new();
+    let mut overlay_nodes = Vec::new();
+    let mut pane_nodes = Vec::new();
+
+    for node in &doc.nodes {
+        match node.component {
+            layout::ComponentKind::MenuBar => menu_nodes.push(node),
+            layout::ComponentKind::OverlayRegion => overlay_nodes.push(node),
+            layout::ComponentKind::TerminalPane => pane_nodes.push(node),
+            layout::ComponentKind::Unknown => {}
+        }
     }
+
+    for _node in menu_nodes {
+        let rect = Rect {
+            x: 0.0,
+            y: top_offset,
+            width,
+            height: MENU_BAR_HEIGHT,
+        };
+        push_rect(&mut vertices, rect, [0.3, 0.3, 0.35], width, height);
+        top_offset += MENU_BAR_HEIGHT;
+    }
+
+    for _node in overlay_nodes.iter().rev() {
+        let rect = Rect {
+            x: 0.0,
+            y: height - bottom_offset - OVERLAY_HEIGHT,
+            width,
+            height: OVERLAY_HEIGHT,
+        };
+        push_rect(&mut vertices, rect, [0.25, 0.65, 0.25], width, height);
+        bottom_offset += OVERLAY_HEIGHT;
+    }
+
+    let available = (height - top_offset - bottom_offset).max(0.0);
+    if !pane_nodes.is_empty() {
+        let total_grow: f32 = pane_nodes.iter().map(|n| n.layout.flex_grow.max(0.0)).sum();
+        let fallback_ratio = 1.0 / pane_nodes.len() as f32;
+        let mut current_y = top_offset;
+        for node in pane_nodes.iter() {
+            let ratio = if total_grow > 0.0 {
+                node.layout.flex_grow.max(0.0) / total_grow
+            } else {
+                fallback_ratio
+            };
+            let rect_height = (available * ratio).max(0.0);
+            let rect = Rect {
+                x: 0.0,
+                y: current_y,
+                width,
+                height: rect_height,
+            };
+            push_rect(&mut vertices, rect, [0.15, 0.35, 0.65], width, height);
+            current_y += rect_height;
+        }
+    }
+
+    vertices
+}
+
+#[derive(Clone, Copy)]
+struct Rect {
+    x: f32,
+    y: f32,
+    width: f32,
+    height: f32,
+}
+
+fn push_rect(vertices: &mut Vec<Vertex>, rect: Rect, color: [f32; 3], width: f32, height: f32) {
+    if rect.width <= 0.0 || rect.height <= 0.0 {
+        return;
+    }
+    let to_ndc = |px: f32, py: f32| -> [f32; 2] {
+        let x = (px / width) * 2.0 - 1.0;
+        let y = 1.0 - (py / height) * 2.0;
+        [x, y]
+    };
+
+    let x0 = rect.x;
+    let y0 = rect.y;
+    let x1 = rect.x + rect.width;
+    let y1 = rect.y + rect.height;
+
+    let v0 = Vertex {
+        position: to_ndc(x0, y0),
+        color,
+    };
+    let v1 = Vertex {
+        position: to_ndc(x1, y0),
+        color,
+    };
+    let v2 = Vertex {
+        position: to_ndc(x1, y1),
+        color,
+    };
+    let v3 = Vertex {
+        position: to_ndc(x0, y1),
+        color,
+    };
+
+    vertices.extend_from_slice(&[v0, v1, v2, v0, v2, v3]);
 }
