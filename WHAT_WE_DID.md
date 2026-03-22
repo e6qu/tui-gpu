@@ -3,4 +3,4 @@
 - Implemented renderer skeleton + layout compiler CLI.
 - Added runtime-core (event log + CAS) and runtime CLI.
 - Wired renderer to load compiled layouts and use Taffy for layout-driven quads.
-- Built initial `terminal-session` crate: spawns PTY, forks shell, and passes unit test verifying output capture.
+- Built initial terminal session crate with PTY spawn/capture; decided to switch to `alacritty_terminal` for terminal buffer handling instead of libvterm.
