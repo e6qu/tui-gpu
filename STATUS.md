@@ -1,4 +1,4 @@
 ## STATUS
-- Renderer: Taffy layout integration renders panes/menus/overlays; ready to accept terminal buffer content.
-- Terminal session crate now spawns PTY-backed shells **and** maintains a VT buffer using the `vte` crate (unit tests pass with `printf`).
+- GUI renderer: wgpu surface + layout grid are back, and the PTY output renders via the glyph pipeline.
+- TUI mode is still a placeholder; we’ll rebuild the ANSI path after the GUI side stabilizes.
 - Layout compiler + runtime core/CLI + docs are up-to-date.
