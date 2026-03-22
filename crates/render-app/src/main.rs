@@ -1,8 +1,11 @@
 use std::sync::Arc;
 
 use anyhow::Result;
+use layout::LayoutDocument;
 use log::info;
 use wgpu::util::DeviceExt;
+mod layout;
+
 use winit::{
     event::{ElementState, Event, KeyEvent, WindowEvent},
     event_loop::{ControlFlow, EventLoop},
@@ -12,6 +15,7 @@ use winit::{
 
 const GRID_COLUMNS: u32 = 20;
 const GRID_ROWS: u32 = 12;
+const LAYOUT_PATH: &str = "generated/layouts/main_screen.json";
 
 #[repr(C)]
 #[derive(Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
@@ -60,10 +64,12 @@ struct State {
     pipeline: wgpu::RenderPipeline,
     vertex_buffer: wgpu::Buffer,
     vertex_count: u32,
+    layout: LayoutDocument,
 }
 
 impl State {
     async fn new(window: Arc<winit::window::Window>) -> Result<Self> {
+        let layout = load_layout()?;
         let size = window.inner_size();
         let instance = wgpu::Instance::default();
         let surface = instance.create_surface(window.clone())?;
@@ -164,6 +170,7 @@ impl State {
             pipeline,
             vertex_buffer,
             vertex_count: vertices.len() as u32,
+            layout,
         })
     }
 
@@ -267,6 +274,13 @@ fn handle_keyboard_event(event: &KeyEvent, target: &winit::event_loop::EventLoop
             target.exit();
         }
     }
+}
+
+fn load_layout() -> Result<LayoutDocument> {
+    let content = std::fs::read_to_string(LAYOUT_PATH)
+        .map_err(|e| anyhow::anyhow!("failed to read layout {LAYOUT_PATH}: {e}"))?;
+    let doc: LayoutDocument = serde_json::from_str(&content)?;
+    Ok(doc)
 }
 
 #[cfg(test)]

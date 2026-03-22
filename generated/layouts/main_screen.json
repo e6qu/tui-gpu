@@ -1,0 +1,92 @@
+{
+  "meta": {
+    "id": "main_screen",
+    "title": "Main Screen"
+  },
+  "nodes": [
+    {
+      "id": "primary",
+      "component": "terminal_pane",
+      "layout": {
+        "display": "flex",
+        "flex_direction": "column",
+        "flex_grow": 1.0,
+        "padding": {
+          "left": 0.0,
+          "right": 0.0,
+          "top": 0.0,
+          "bottom": 0.0
+        },
+        "margin": {
+          "left": 0.0,
+          "right": 0.0,
+          "top": 0.0,
+          "bottom": 0.0
+        },
+        "z_index": 0
+      },
+      "accessibility": {
+        "label": null,
+        "tab_index": 0,
+        "mnemonic": null,
+        "role": null
+      }
+    },
+    {
+      "id": "status",
+      "component": "overlay_region",
+      "layout": {
+        "display": "flex",
+        "flex_direction": "column",
+        "flex_grow": 1.0,
+        "padding": {
+          "left": 0.0,
+          "right": 0.0,
+          "top": 0.0,
+          "bottom": 0.0
+        },
+        "margin": {
+          "left": 0.0,
+          "right": 0.0,
+          "top": 0.0,
+          "bottom": 0.0
+        },
+        "z_index": 900
+      },
+      "accessibility": {
+        "label": "Status Bar",
+        "tab_index": 0,
+        "mnemonic": null,
+        "role": null
+      }
+    },
+    {
+      "id": "main_menu",
+      "component": "menu_bar",
+      "layout": {
+        "display": "flex",
+        "flex_direction": "column",
+        "flex_grow": 1.0,
+        "padding": {
+          "left": 0.0,
+          "right": 0.0,
+          "top": 0.0,
+          "bottom": 0.0
+        },
+        "margin": {
+          "left": 0.0,
+          "right": 0.0,
+          "top": 0.0,
+          "bottom": 0.0
+        },
+        "z_index": 0
+      },
+      "accessibility": {
+        "label": null,
+        "tab_index": 0,
+        "mnemonic": null,
+        "role": null
+      }
+    }
+  ]
+}
