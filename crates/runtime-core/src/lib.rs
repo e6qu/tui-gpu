@@ -151,6 +151,39 @@ impl CasStore {
     }
 }
 
+/// Event log reader for iterating stored events.
+pub struct EventLogReader {
+    root: PathBuf,
+}
+
+impl EventLogReader {
+    pub fn new(root: impl AsRef<Path>) -> Self {
+        Self {
+            root: root.as_ref().to_path_buf(),
+        }
+    }
+
+    /// Reads all events for the provided YYYY-MM-DD day string.
+    pub fn read_day(&self, day: &str) -> Result<Vec<Event>> {
+        let path = self.root.join("events").join(format!("{day}.log"));
+        if !path.exists() {
+            return Ok(Vec::new());
+        }
+        let data =
+            fs::read_to_string(&path).with_context(|| format!("reading {}", path.display()))?;
+        let mut events = Vec::new();
+        for line in data.lines() {
+            if line.trim().is_empty() {
+                continue;
+            }
+            let event: Event = serde_json::from_str(line)
+                .with_context(|| format!("parsing event in {}", path.display()))?;
+            events.push(event);
+        }
+        Ok(events)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -187,5 +220,25 @@ mod tests {
         let path = dir.path().join("events").join(format!("{day}.log"));
         let data = fs::read_to_string(path).unwrap();
         assert!(data.contains("evt_test"));
+    }
+
+    #[test]
+    fn log_reader_roundtrip() {
+        let dir = tempdir().unwrap();
+        let writer = EventLogWriter::new(dir.path());
+        let reader = EventLogReader::new(dir.path());
+        let event = Event::new(
+            "agent_a",
+            EventPayload::SignalRaised {
+                agent: "agent_a".into(),
+                kind: "Interrupt".into(),
+                severity: Severity::Warn,
+            },
+        );
+        writer.append(&event).unwrap();
+        let day = event.timestamp.format("%Y-%m-%d").to_string();
+        let events = reader.read_day(&day).unwrap();
+        assert_eq!(events.len(), 1);
+        assert_eq!(events[0].id, event.id);
     }
 }

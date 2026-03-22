@@ -2,6 +2,7 @@
 members = [
     "crates/render-app",
     "crates/layout-compiler",
-    "crates/runtime-core"
+    "crates/runtime-core",
+    "crates/runtime-cli"
 ]
 resolver = "2"
