@@ -9,6 +9,8 @@ pub const BLOCKY_PALETTE: &str = " ░▒▓█";
 pub const DEFAULT_CELL_ASPECT: f32 = 9.0 / 16.0;
 const BRAILLE_CELL_ASPECT: f32 = DEFAULT_CELL_ASPECT;
 const BLOCK_THRESHOLD: f32 = 0.2;
+const FULL_BLOCK_THRESHOLD: f32 = 0.55;
+const HALF_BLOCK_THRESHOLD: f32 = 0.35;
 const BRAILLE_BITS: [u8; 8] = [0, 1, 2, 6, 3, 4, 5, 7];
 
 /// Converts the provided image into ANSI-colored ASCII art sized for terminal grids.
@@ -156,7 +158,34 @@ pub fn convert_image_to_blocks(
     let rgb = image.to_rgb8();
     let resized = image::imageops::resize(&rgb, width_chars, target_height, FilterType::Triangle);
     let mut output = String::new();
-    let mut current_color: Option<(u8, u8, u8)> = None;
+    let mut current_fg: Option<(u8, u8, u8)> = None;
+    let mut current_bg: Option<(u8, u8, u8)> = None;
+    let set_fg = |color: (u8, u8, u8), out: &mut String, current: &mut Option<(u8, u8, u8)>| {
+        if current.as_ref() != Some(&color) {
+            out.push_str(&format!("\x1b[38;2;{};{};{}m", color.0, color.1, color.2));
+            *current = Some(color);
+        }
+    };
+    let set_bg = |color: (u8, u8, u8), out: &mut String, current: &mut Option<(u8, u8, u8)>| {
+        if current.as_ref() != Some(&color) {
+            out.push_str(&format!("\x1b[48;2;{};{};{}m", color.0, color.1, color.2));
+            *current = Some(color);
+        }
+    };
+    let reset_attrs =
+        |out: &mut String, fg: &mut Option<(u8, u8, u8)>, bg: &mut Option<(u8, u8, u8)>| {
+            if fg.is_some() || bg.is_some() {
+                out.push_str("\x1b[0m");
+                *fg = None;
+                *bg = None;
+            }
+        };
+    let reset_bg = |out: &mut String, bg: &mut Option<(u8, u8, u8)>| {
+        if bg.is_some() {
+            out.push_str("\x1b[49m");
+            *bg = None;
+        }
+    };
     for row in 0..height_chars {
         for col in 0..width_chars {
             let upper = resized.get_pixel(col, row * 2);
@@ -164,53 +193,61 @@ pub fn convert_image_to_blocks(
                 resized.get_pixel(col, (row * 2 + 1).min(resized.height().saturating_sub(1)));
             let upper_lum = luminance(upper[0], upper[1], upper[2]) / 255.0;
             let lower_lum = luminance(lower[0], lower[1], lower[2]) / 255.0;
-            let glyph = match (upper_lum >= BLOCK_THRESHOLD, lower_lum >= BLOCK_THRESHOLD) {
-                (false, false) => {
-                    if current_color.is_some() {
-                        output.push_str("\x1b[0m");
-                        current_color = None;
-                    }
-                    output.push(' ');
-                    continue;
+            let upper_color = (upper[0], upper[1], upper[2]);
+            let lower_color = (lower[0], lower[1], lower[2]);
+            let avg_color = (
+                ((upper[0] as u16 + lower[0] as u16) / 2) as u8,
+                ((upper[1] as u16 + lower[1] as u16) / 2) as u8,
+                ((upper[2] as u16 + lower[2] as u16) / 2) as u8,
+            );
+            let combined = (upper_lum + lower_lum) * 0.5;
+            let glyph = if upper_lum >= FULL_BLOCK_THRESHOLD && lower_lum >= FULL_BLOCK_THRESHOLD {
+                set_fg(avg_color, &mut output, &mut current_fg);
+                reset_bg(&mut output, &mut current_bg);
+                '█'
+            } else if upper_lum >= FULL_BLOCK_THRESHOLD && lower_lum <= HALF_BLOCK_THRESHOLD {
+                set_fg(upper_color, &mut output, &mut current_fg);
+                if lower_lum > BLOCK_THRESHOLD {
+                    set_bg(lower_color, &mut output, &mut current_bg);
+                } else {
+                    reset_bg(&mut output, &mut current_bg);
                 }
-                (true, true) => {
-                    let color = (
-                        ((upper[0] as u16 + lower[0] as u16) / 2) as u8,
-                        ((upper[1] as u16 + lower[1] as u16) / 2) as u8,
-                        ((upper[2] as u16 + lower[2] as u16) / 2) as u8,
-                    );
-                    if current_color != Some(color) {
-                        output.push_str(&format!("\x1b[38;2;{};{};{}m", color.0, color.1, color.2));
-                        current_color = Some(color);
-                    }
-                    '█'
+                '▀'
+            } else if lower_lum >= FULL_BLOCK_THRESHOLD && upper_lum <= HALF_BLOCK_THRESHOLD {
+                if upper_lum > BLOCK_THRESHOLD {
+                    set_bg(upper_color, &mut output, &mut current_bg);
+                } else {
+                    reset_bg(&mut output, &mut current_bg);
                 }
-                (true, false) => {
-                    let color = (upper[0], upper[1], upper[2]);
-                    if current_color != Some(color) {
-                        output.push_str(&format!("\x1b[38;2;{};{};{}m", color.0, color.1, color.2));
-                        current_color = Some(color);
-                    }
-                    '▀'
-                }
-                (false, true) => {
-                    let color = (lower[0], lower[1], lower[2]);
-                    if current_color != Some(color) {
-                        output.push_str(&format!("\x1b[38;2;{};{};{}m", color.0, color.1, color.2));
-                        current_color = Some(color);
-                    }
-                    '▄'
-                }
+                set_fg(lower_color, &mut output, &mut current_fg);
+                '▄'
+            } else if combined >= BLOCK_THRESHOLD {
+                set_fg(avg_color, &mut output, &mut current_fg);
+                set_bg(avg_color, &mut output, &mut current_bg);
+                shade_glyph(combined)
+            } else {
+                set_fg(avg_color, &mut output, &mut current_fg);
+                set_bg(avg_color, &mut output, &mut current_bg);
+                '░'
             };
             output.push(glyph);
         }
-        if current_color.is_some() {
-            output.push_str("\x1b[0m");
-            current_color = None;
-        }
+        reset_attrs(&mut output, &mut current_fg, &mut current_bg);
         output.push('\n');
     }
     Ok(output)
+}
+
+fn shade_glyph(intensity: f32) -> char {
+    if intensity >= 0.75 {
+        '█'
+    } else if intensity >= 0.5 {
+        '▓'
+    } else if intensity >= 0.3 {
+        '▒'
+    } else {
+        '░'
+    }
 }
 
 fn luminance(r: u8, g: u8, b: u8) -> f32 {
@@ -228,7 +265,8 @@ fn palette_index(level: f32, palette_len: usize) -> usize {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use image::{ImageBuffer, Rgb};
+    use image::{DynamicImage, ImageBuffer, Rgb};
+    use std::path::Path;
 
     #[test]
     fn converts_to_ansi() {
@@ -263,5 +301,60 @@ mod tests {
         }));
         let art = convert_image_to_blocks(&img, 1, Some(1), DEFAULT_CELL_ASPECT).unwrap();
         assert!(art.contains('▀') || art.contains('▄') || art.contains('█'));
+    }
+
+    #[test]
+    fn block_converter_respects_dimensions() {
+        let img = DynamicImage::ImageRgb8(ImageBuffer::from_fn(8, 8, |x, y| {
+            if (x + y) % 2 == 0 {
+                Rgb([200, 200, 200])
+            } else {
+                Rgb([50, 50, 50])
+            }
+        }));
+        let width = 6;
+        let height = 5;
+        let art = convert_image_to_blocks(&img, width, Some(height), DEFAULT_CELL_ASPECT).unwrap();
+        let lines: Vec<&str> = art.lines().collect();
+        assert_eq!(lines.len(), height as usize);
+        for line in lines {
+            let stripped = strip_ansi(line);
+            assert_eq!(stripped.chars().count(), width as usize);
+        }
+    }
+
+    #[test]
+    fn block_converter_handles_demo_image() {
+        let path = Path::new("../../assets/demo.png");
+        if path.exists() {
+            let img = image::open(path).expect("demo image");
+            let width = 20;
+            let height = 12;
+            let art =
+                convert_image_to_blocks(&img, width, Some(height), DEFAULT_CELL_ASPECT).unwrap();
+            let lines: Vec<&str> = art.lines().collect();
+            assert_eq!(lines.len(), height as usize);
+            for line in lines {
+                let stripped = strip_ansi(line);
+                assert_eq!(stripped.chars().count(), width as usize);
+            }
+        }
+    }
+
+    fn strip_ansi(input: &str) -> String {
+        let mut out = String::with_capacity(input.len());
+        let mut chars = input.chars();
+        while let Some(ch) = chars.next() {
+            if ch == '\x1b' {
+                while let Some(c) = chars.next() {
+                    if c == 'm' {
+                        break;
+                    }
+                }
+            } else {
+                out.push(ch);
+            }
+        }
+        out
     }
 }

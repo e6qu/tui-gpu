@@ -894,6 +894,17 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7e3450815272ef58cec6d564423f6e755e25379b217b0bc688e295ba24df6b1d"
 
 [[package]]
+name = "futures-intrusive"
+version = "0.5.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1d930c203dd0b6ff06e0201a4a2fe9149b43c684fd4420555b26d21b1a02956f"
+dependencies = [
+ "futures-core",
+ "lock_api",
+ "parking_lot",
+]
+
+[[package]]
 name = "futures-task"
 version = "0.3.32"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1865,24 +1876,9 @@ name = "render-app"
 version = "0.1.0"
 dependencies = [
  "anyhow",
- "bytemuck",
  "clap",
- "crossterm",
- "doom-input",
  "env_logger",
- "font8x8",
- "frame-feed",
- "image",
- "log",
- "pollster",
- "rodio",
- "serde",
- "serde_json",
- "signal-hook",
- "taffy",
- "terminal-session",
- "wgpu",
- "winit",
+ "renderer-core",
 ]
 
 [[package]]
@@ -1890,6 +1886,30 @@ name = "renderdoc-sys"
 version = "1.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "19b30a45b0cd0bcca8037f3d0dc3421eaf95327a17cad11964fb8179b4fc4832"
+
+[[package]]
+name = "renderer-core"
+version = "0.1.0"
+dependencies = [
+ "ansi-image",
+ "anyhow",
+ "bytemuck",
+ "crossterm",
+ "doom-input",
+ "font8x8",
+ "frame-feed",
+ "futures-intrusive",
+ "image",
+ "log",
+ "pollster",
+ "rodio",
+ "serde",
+ "serde_json",
+ "taffy",
+ "terminal-session",
+ "wgpu",
+ "winit",
+]
 
 [[package]]
 name = "rodio"

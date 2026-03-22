@@ -4,22 +4,7 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
+clap = { version = "4.5", features = ["derive"] }
 anyhow = "1.0"
 env_logger = "0.10"
-log = "0.4"
-pollster = "0.3"
-bytemuck = { version = "1.14", features = ["derive"] }
-serde = { version = "1.0", features = ["derive"] }
-serde_json = "1.0"
-taffy = "0.3"
-wgpu = "0.19"
-winit = "0.29"
-font8x8 = "0.3"
-terminal-session = { path = "../terminal-session" }
-frame-feed = { path = "../frame-feed" }
-doom-input = { path = "../doom-input" }
-clap = { version = "4.5", features = ["derive"] }
-crossterm = "0.27"
-image = { version = "0.24", default-features = false, features = ["png"] }
-signal-hook = "0.3"
-rodio = "0.17"
+renderer-core = { path = "../renderer-core" }

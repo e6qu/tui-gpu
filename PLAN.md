@@ -4,9 +4,9 @@
 2. ✅ Reattach the PTY session + VT buffer so we can render glyphs again (GUI mode now shows the live terminal pane).
 
 ### Phase 2 — Bring back demos/feeds
-3. Restore Doom frame/input/audio feeds and the RGB texture pipeline.
-4. Re-introduce the plasma demo and add the GPU compute raytracer alongside the CPU fallback.
+3. ✅ Restore Doom frame/input/audio feeds and the RGB texture pipeline (frame feed + input/audio wiring are now handled inside `renderer-core`).
+4. ✅ Re-introduce the plasma demo and add the GPU compute raytracer alongside the CPU fallback (both now run on CPU or GPU and render via GUI/TUI).
 
 ### Phase 3 — Instrumentation + docs
-5. Layer FPS counters + CLI switches to compare CPU vs GPU in both GUI and TUI.
+5. ✅ Layer FPS counters (CLI switches are in place) to compare CPU vs GPU in both GUI and TUI.
 6. Refresh layout/runtime docs + tests once the renderer is functional again.

@@ -1,4 +1,7 @@
 ## DO NEXT
-- Finish Phase 1 by teaching TUI mode to consume the PTY buffer (downsample glyphs to ANSI) so GUI/TUI share the same terminal rendering path.
-- Reintegrate RGB demos (plasma, ray, Doom feed) into the GUI renderer, then mirror them to TUI.
-- Add FPS logging + CLI switches for CPU vs GPU demos once the content paths are back.
+- ✅ Rebuild GUI renderer + PTY glyph pipeline.
+- ✅ Hook TUI/ANSI mode to the PTY buffer.
+- ✅ Reintroduce RGB demos (plasma, ray, Doom feed) on GUI and mirror them to TUI.
+- ✅ Add CPU/GPU toggles so every demo can run on either backend.
+- ✅ Add FPS logging / instrumentation hooks.
+- Next: refresh docs/tests around the new renderer-core API.

@@ -1,6 +1,7 @@
 [workspace]
 members = [
     "crates/render-app",
+    "crates/renderer-core",
     "crates/layout-compiler",
     "crates/runtime-core",
     "crates/runtime-cli",

@@ -10,22 +10,39 @@ Pick a demo with `--demo`:
 |-------------|-----------------------------------------------------------------|
 | `terminal`  | Default PTY-only terminal.                                      |
 | `plasma`    | Built-in RGB plasma animation (use the GPU window or `--mode tui`). |
-| `ray`       | CPU raytracer demo rendered into the pane (works in GUI and TUI). |
+| `ray`       | CPU/GPU raytracer demo rendered into the pane (works in GUI and TUI). |
 | `doom`      | Streams DoomGeneric frames; requires `--doom-iwad /path/to/wad`. |
+| `youtube`   | Streams a YouTube video (requires `yt-dlp` + `ffmpeg`).               |
 
 ```bash
 # default VT-only demo
 cargo run -p render-app
 
-# plasma RGB demo in the GUI window
-cargo run -p render-app -- --demo plasma
+# plasma RGB demo in the GUI window (CPU generator)
+cargo run -p render-app -- --demo plasma --compute cpu
 
-# render the same demo inside the ANSI/TUI mode
+# GPU compute + GUI output
+cargo run -p render-app -- --demo plasma --compute gpu --mode gui
+
+# render the same demo inside the ANSI/TUI mode (CPU path)
 cargo run -p render-app -- --demo plasma --mode tui
+
+# GPU compute feeding ANSI output (downsampled)
+cargo run -p render-app -- --demo plasma --compute gpu --mode tui
 
 # raytracer demo (GUI or TUI)
 cargo run -p render-app -- --demo ray
 cargo run -p render-app -- --demo ray --mode tui
+
+# log average FPS every 5 seconds
+cargo run -p render-app -- --demo plasma --mode gui --fps-log 5
+
+# youtube demo (GUI/TUI, CPU pipeline; configure via env vars)
+export TUI_GPU_YOUTUBE_URL="https://www.youtube.com/watch?v=dQw4w9WgXcQ"
+cargo run -p render-app -- --demo youtube
+cargo run -p render-app -- --demo youtube --mode tui
+# disable audio playback if you only want the video feed
+cargo run -p render-app -- --demo youtube --youtube-audio false
 ```
 
 The window displays the current layout (menus + terminal pane). By default the pane renders VT glyphs sourced from the PTY (a shell). When you pick a demo that streams RGB frames (e.g. `plasma` or `doom`), the pane automatically switches to textured output. Press `F9` at any time to toggle keyboard focus between the shell (VT mode) and the external input feed (used by raw RGB producers such as Doom).
@@ -62,6 +79,49 @@ cargo run -p tui-demos -- feed-cube --width 160 --height 90 --fps 30
 
 While frames are flowing, the pane automatically switches from glyph rendering to textured RGB output. Press `F9` to flip keyboard focus between the PTY and the external input feed (`/tmp/tui_gpu_inputfeed`, configurable via `TUI_GPU_INPUT_FEED`). External producers should read the input feed to receive key events.
 
+## Renderer library
+
+The shared rendering logic now lives in the `renderer-core` crate. It exposes `run_gui` (GPU window), `run_tui` (ANSI), and `run_app` helpers so other binaries can embed the renderer without reimplementing the event loops. Every demo can pick the compute backend (`ComputeMode::Cpu` or `ComputeMode::Gpu`) independently from the presentation backend (`AppMode::Gui` for pixel output or `AppMode::Tui` for ANSI).
+
+```rust
+use renderer_core::{run_app_with_options, AppMode, ComputeMode, DemoKind, RendererOptions};
+use std::time::Duration;
+
+fn main() -> anyhow::Result<()> {
+    // Launch the ray demo in the GPU window, log FPS every 5 seconds.
+    run_app_with_options(
+        DemoKind::Ray,
+        ComputeMode::Gpu,
+        AppMode::Gui,
+        RendererOptions {
+            fps_sample_interval: Some(Duration::from_secs(5)),
+        },
+    )
+}
+```
+
+The same API can render CPU-style colored ANSI output by swapping to `AppMode::Tui` and choosing either CPU or GPU compute. Examples and future binaries can call into `renderer-core` directly to mix PTY glyph rendering with RGB textures in whichever combination they need.
+
+> GPU compute is currently available for the `plasma` and `ray` demos. The terminal/PTY demo and Doom feed continue to run in CPU mode.
+
+### YouTube demo
+
+The built-in YouTube demo relies on `yt-dlp` and `ffmpeg` to fetch and decode frames. Install them first (reuse the same steps listed in the `youtube-ansi` helper below). Configure playback via environment variables (all optional):
+
+| Variable | Description | Default |
+|----------|-------------|---------|
+| `TUI_GPU_YOUTUBE_URL` | YouTube URL to stream. Ignored if `TUI_GPU_YOUTUBE_INPUT` is set. | `https://www.youtube.com/watch?v=dQw4w9WgXcQ` |
+| `TUI_GPU_YOUTUBE_INPUT` | Local video file to play instead of streaming. | unset |
+| `TUI_GPU_YOUTUBE_WIDTH` / `TUI_GPU_YOUTUBE_HEIGHT` | Target decode resolution. Height defaults to a 16:9 aspect ratio when omitted. | `320x180` |
+| `TUI_GPU_YOUTUBE_FPS` | Frame rate requested from ffmpeg. | `24` |
+| `TUI_GPU_YOUTUBE_YTDLP` / `TUI_GPU_YOUTUBE_FFMPEG` | Paths to the executables. | `yt-dlp` / `ffmpeg` |
+| `TUI_GPU_YOUTUBE_FORMAT` | yt-dlp format selector for the video stream. | AVC/H.264 MP4 preference |
+| `TUI_GPU_YOUTUBE_AUDIO` | Set to `false` to disable audio playback (CLI flag `--youtube-audio`). | `true` |
+| `TUI_GPU_YOUTUBE_AUDIO_FORMAT` | yt-dlp format selector for the audio stream. | `bestaudio/best` |
+| `TUI_GPU_YOUTUBE_AUDIO_RATE` | Sample rate (Hz) for audio playback. | `44100` |
+
+Run `render-app -- --demo youtube` (GUI) or add `--mode tui` for the ANSI view. Compute mode is always CPU for this demo. Use `--youtube-audio false` or `TUI_GPU_YOUTUBE_AUDIO=false` if you only want the silent video feed.
+
 ## Running Doom
 
 `render-app` can now spawn the DoomGeneric feed internally. Provide an IWAD (`doom1.wad`, `freedoom1.wad`, etc.) and run the `doom` demo:
@@ -93,6 +153,8 @@ Steps:
 4. Press `F9` again to return focus to the PTY or hit `Esc`/`q` to exit.
 
 This setup lets you experiment with GPU blitting, native RGB rendering, and off-the-shelf engines (like Doom) without touching the renderer’s code—just stream frames/events through the feeds.
+
+The renderer opens the shared audio/input feeds automatically when you pick `--demo doom`: audio events are mixed via `rodio`, and keyboard focus starts on the external feed (press `F9` to fall back to the PTY shell).
 
 ## Colored-ANSI YouTube demo
 
