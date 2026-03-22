@@ -1,0 +1,6 @@
+[workspace]
+members = [
+    "crates/render-app",
+    "crates/layout-compiler"
+]
+resolver = "2"

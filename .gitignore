@@ -3,6 +3,7 @@
 /dist/
 /.cache/
 /tmp/
+/generated/
 
 # Editor/OS
 .DS_Store
