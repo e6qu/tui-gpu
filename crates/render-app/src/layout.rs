@@ -19,6 +19,8 @@ pub struct LayoutNode {
     pub component: ComponentKind,
     pub layout: LayoutProps,
     pub accessibility: AccessibilityProps,
+    #[serde(default)]
+    pub children: Vec<LayoutNode>,
 }
 
 #[derive(Debug, Deserialize)]

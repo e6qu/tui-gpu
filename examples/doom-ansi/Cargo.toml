@@ -1,0 +1,14 @@
+[package]
+name = "doom-ansi"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+anyhow = "1.0"
+clap = { version = "4.5", features = ["derive"] }
+frame-feed = { path = "../../crates/frame-feed" }
+crossterm = "0.27"
+image = { version = "0.24", default-features = false, features = ["png"] }
+ansi-image = { path = "../../crates/ansi-image" }
+doom-input = { path = "../../crates/doom-input" }
+rodio = "0.17"

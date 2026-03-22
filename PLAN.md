@@ -1,6 +1,12 @@
 ## PLAN
-1. Render VT buffer in renderer panes (glyph cache/text rendering).
-2. Enhance layout compiler (nested nodes/z-order) feeding Taffy tree directly.
-3. Build runtime API/event bus atop runtime-core with tests.
-4. Add CI + visual smoke tests (tmux/screenshots).
-5. Prototype a GPU-accelerated spinning cube/lightracer demo rendered inside the TUI (both renderer + raytracer accelerated).
+### Phase 1 — Rebuild the renderer core
+1. Recreate `render-app`’s wgpu surface/device setup, layout loading, and event loop.
+2. Reattach the PTY session + VT buffer so we can render glyphs again.
+
+### Phase 2 — Bring back demos/feeds
+3. Restore Doom frame/input/audio feeds and the RGB texture pipeline.
+4. Re-introduce the plasma demo and add the GPU compute raytracer alongside the CPU fallback.
+
+### Phase 3 — Instrumentation + docs
+5. Layer FPS counters + CLI switches to compare CPU vs GPU in both GUI and TUI.
+6. Refresh layout/runtime docs + tests once the renderer is functional again.

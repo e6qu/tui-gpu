@@ -1,0 +1,11 @@
+[package]
+name = "youtube-ansi"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+anyhow = "1.0"
+ansi-image = { path = "../../crates/ansi-image" }
+clap = { version = "4.5", features = ["derive"] }
+image = { version = "0.24", default-features = false, features = ["png"] }
+rodio = "0.17"

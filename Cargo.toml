@@ -4,6 +4,14 @@ members = [
     "crates/layout-compiler",
     "crates/runtime-core",
     "crates/runtime-cli",
-    "crates/terminal-session"
+    "crates/terminal-session",
+    "crates/ansi-image",
+    "crates/doom-input",
+    "crates/frame-feed",
+    "examples/tui-demos",
+    "examples/doom-feed",
+    "examples/ansi-image-demo",
+    "examples/doom-ansi",
+    "examples/youtube-ansi",
 ]
 resolver = "2"

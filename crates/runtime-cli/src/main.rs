@@ -1,6 +1,7 @@
 use std::path::PathBuf;
 
-use anyhow::Result;
+use ansi_image::{convert_image_to_ansi, DEFAULT_CELL_ASPECT, DEFAULT_PALETTE};
+use anyhow::{Context, Result};
 use chrono::Utc;
 use clap::{Parser, Subcommand};
 use runtime_core::{Event, EventLogReader, EventLogWriter, EventPayload};
@@ -37,6 +38,20 @@ enum Commands {
         #[arg(long)]
         day: Option<String>,
     },
+    /// Convert an image into ANSI-colored ASCII art for the TUI
+    ImageToAnsi {
+        #[arg(long)]
+        input: PathBuf,
+        /// Target width in terminal cells/columns
+        #[arg(long, default_value_t = 80)]
+        width: u32,
+        /// Optional target height in rows; otherwise auto-computed from aspect ratio
+        #[arg(long)]
+        height: Option<u32>,
+        /// Characters ordered from lightest to darkest to use for ramp
+        #[arg(long, default_value = DEFAULT_PALETTE)]
+        palette: String,
+    },
 }
 
 fn main() -> Result<()> {
@@ -50,6 +65,12 @@ fn main() -> Result<()> {
             labels,
         } => append_message(&cli.root, actor, channel, session, content, labels),
         Commands::List { day } => list_events(&cli.root, day),
+        Commands::ImageToAnsi {
+            input,
+            width,
+            height,
+            palette,
+        } => image_to_ansi(&input, width, height, &palette),
     }
 }
 
@@ -91,5 +112,16 @@ fn list_events(root: &PathBuf, day: Option<String>) -> Result<()> {
             println!("{} {}", event.timestamp, payload);
         }
     }
+    Ok(())
+}
+
+fn image_to_ansi(input: &PathBuf, width: u32, height: Option<u32>, palette: &str) -> Result<()> {
+    let image = image::io::Reader::open(input)
+        .with_context(|| format!("opening image {}", input.display()))?
+        .decode()
+        .with_context(|| format!("decoding image {}", input.display()))?;
+    let chars: Vec<char> = palette.chars().collect();
+    let art = convert_image_to_ansi(&image, width, height, &chars, DEFAULT_CELL_ASPECT)?;
+    print!("{art}\x1b[0m");
     Ok(())
 }

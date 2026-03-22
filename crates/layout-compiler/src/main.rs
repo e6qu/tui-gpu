@@ -1,6 +1,6 @@
 use std::{collections::HashMap, fs, path::PathBuf};
 
-use anyhow::{bail, Context, Result};
+use anyhow::{anyhow, bail, Context, Result};
 use clap::{Parser, Subcommand};
 use regex::Regex;
 use serde::{Deserialize, Serialize};
@@ -81,6 +81,8 @@ struct LayoutNode {
     component: ComponentKind,
     layout: LayoutProps,
     accessibility: AccessibilityProps,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    children: Vec<LayoutNode>,
 }
 
 #[derive(Debug, Deserialize, Serialize)]
@@ -216,52 +218,117 @@ fn split_frontmatter(input: &str) -> Result<(String, String)> {
 }
 
 fn parse_components(body: &str) -> Result<Vec<LayoutNode>> {
-    let component_re = Regex::new(r"<([A-Za-z0-9]+)\s+([^>/]+)/?>").unwrap();
-    let mut nodes = Vec::new();
-    for cap in component_re.captures_iter(body) {
-        let name = &cap[1];
-        let raw_attrs = &cap[2];
-        let attrs = parse_attributes(raw_attrs)?;
-        let id = attrs
-            .get("id")
-            .cloned()
-            .unwrap_or_else(|| format!("{}_{}", name.to_lowercase(), nodes.len()));
-        let component = match name {
-            "TerminalPane" => ComponentKind::TerminalPane,
-            "OverlayRegion" => ComponentKind::OverlayRegion,
-            "MenuBar" => ComponentKind::MenuBar,
-            _ => ComponentKind::Unknown,
-        };
+    let tag_re = Regex::new(r"(?s)<\s*(/)?\s*([A-Za-z0-9_]+)([^<>]*)>").unwrap();
+    let mut stack: Vec<NodeFrame> = Vec::new();
+    let mut roots = Vec::new();
+    let mut auto_index = 0usize;
 
-        let mut layout = LayoutProps::default();
-        if let Some(z) = attrs.get("z") {
-            if let Ok(val) = z.parse::<i32>() {
-                layout.z_index = val;
-            }
+    for cap in tag_re.captures_iter(body) {
+        let is_close = cap.get(1).map(|m| !m.as_str().is_empty()).unwrap_or(false);
+        let name = cap[2].trim();
+        let mut raw_attrs = cap
+            .get(3)
+            .map(|m| m.as_str())
+            .unwrap_or("")
+            .trim()
+            .to_string();
+        let mut self_closing = false;
+        if !is_close && raw_attrs.ends_with('/') {
+            self_closing = true;
+            raw_attrs = raw_attrs.trim_end_matches('/').trim().to_string();
         }
-        let accessibility = AccessibilityProps {
-            label: attrs.get("label").cloned(),
-            tab_index: attrs
-                .get("tabIndex")
-                .and_then(|v| v.parse::<i32>().ok())
-                .unwrap_or(0),
-            mnemonic: attrs.get("mnemonic").cloned(),
-            role: attrs.get("role").cloned(),
-        };
 
-        nodes.push(LayoutNode {
-            id,
-            component,
-            layout,
-            accessibility,
-        });
+        if is_close {
+            let frame = stack
+                .pop()
+                .ok_or_else(|| anyhow!("unexpected closing tag </{name}>"))?;
+            if frame.name != name {
+                bail!(
+                    "mismatched closing tag </{name}> (expected </{}>)",
+                    frame.name
+                );
+            }
+            finalize_node(frame.node, &mut stack, &mut roots);
+            continue;
+        }
+
+        let attrs = parse_attributes(&raw_attrs)?;
+        let node = build_layout_node(name, &attrs, &mut auto_index);
+        if self_closing {
+            finalize_node(node, &mut stack, &mut roots);
+        } else {
+            stack.push(NodeFrame {
+                name: name.to_string(),
+                node,
+            });
+        }
     }
 
-    if nodes.is_empty() {
+    if let Some(frame) = stack.pop() {
+        bail!("unclosed component <{}>", frame.name);
+    }
+
+    if roots.is_empty() {
         bail!("template body contained no recognized components");
     }
 
-    Ok(nodes)
+    Ok(roots)
+}
+
+struct NodeFrame {
+    name: String,
+    node: LayoutNode,
+}
+
+fn finalize_node(node: LayoutNode, stack: &mut Vec<NodeFrame>, roots: &mut Vec<LayoutNode>) {
+    if let Some(parent) = stack.last_mut() {
+        parent.node.children.push(node);
+    } else {
+        roots.push(node);
+    }
+}
+
+fn build_layout_node(
+    name: &str,
+    attrs: &HashMap<String, String>,
+    auto_index: &mut usize,
+) -> LayoutNode {
+    let id = attrs.get("id").cloned().unwrap_or_else(|| {
+        let generated = format!("{}_{}", name.to_lowercase(), *auto_index);
+        *auto_index += 1;
+        generated
+    });
+    let component = match name {
+        "TerminalPane" => ComponentKind::TerminalPane,
+        "OverlayRegion" => ComponentKind::OverlayRegion,
+        "MenuBar" => ComponentKind::MenuBar,
+        _ => ComponentKind::Unknown,
+    };
+
+    let mut layout = LayoutProps::default();
+    if let Some(z) = attrs.get("z") {
+        if let Ok(val) = z.parse::<i32>() {
+            layout.z_index = val;
+        }
+    }
+
+    let accessibility = AccessibilityProps {
+        label: attrs.get("label").cloned(),
+        tab_index: attrs
+            .get("tabIndex")
+            .and_then(|v| v.parse::<i32>().ok())
+            .unwrap_or(0),
+        mnemonic: attrs.get("mnemonic").cloned(),
+        role: attrs.get("role").cloned(),
+    };
+
+    LayoutNode {
+        id,
+        component,
+        layout,
+        accessibility,
+        children: Vec::new(),
+    }
 }
 
 fn parse_attributes(input: &str) -> Result<HashMap<String, String>> {
@@ -299,7 +366,27 @@ mod tests {
         let nodes = parse_components(body).unwrap();
         assert_eq!(nodes.len(), 2);
         assert_eq!(nodes[0].id, "main");
-        matches!(nodes[0].component, ComponentKind::TerminalPane);
+        assert!(matches!(nodes[0].component, ComponentKind::TerminalPane));
         assert_eq!(nodes[1].layout.z_index, 900);
+    }
+
+    #[test]
+    fn nested_nodes_build_tree() {
+        let body = "\
+            <MenuBar id=\"root\">\n\
+              <TerminalPane id=\"child\" />\n\
+              <OverlayRegion id=\"overlay\">\n\
+                <TerminalPane />\n\
+              </OverlayRegion>\n\
+            </MenuBar>\n";
+        let nodes = parse_components(body).unwrap();
+        assert_eq!(nodes.len(), 1);
+        assert_eq!(nodes[0].id, "root");
+        assert_eq!(nodes[0].children.len(), 2);
+        assert_eq!(nodes[0].children[0].id, "child");
+        assert_eq!(nodes[0].children[1].children.len(), 1);
+        assert!(nodes[0].children[1].children[0]
+            .id
+            .starts_with("terminalpane_"));
     }
 }
