@@ -39,7 +39,7 @@ pub struct AccessibilityProps {
     pub role: Option<String>,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Clone, Copy)]
 #[serde(rename_all = "snake_case")]
 pub enum ComponentKind {
     TerminalPane,

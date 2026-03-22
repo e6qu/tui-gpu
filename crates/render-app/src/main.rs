@@ -2,8 +2,12 @@ use std::sync::Arc;
 
 use anyhow::Result;
 mod layout;
-use layout::LayoutDocument;
+use layout::{ComponentKind, LayoutDocument, LayoutNode};
 use log::info;
+use taffy::prelude::{
+    AvailableSpace, Dimension, FlexDirection as TaffyFlexDirection, LengthPercentageAuto, Node,
+    Position, Rect as TaffyRect, Size, Style, Taffy,
+};
 use wgpu::util::DeviceExt;
 
 use winit::{
@@ -43,12 +47,13 @@ struct State {
     queue: wgpu::Queue,
     config: wgpu::SurfaceConfiguration,
     pipeline: wgpu::RenderPipeline,
-    layout: LayoutDocument,
+    layout_engine: LayoutEngine,
 }
 
 impl State {
     async fn new(window: Arc<winit::window::Window>) -> Result<Self> {
         let layout = load_layout()?;
+        let layout_engine = LayoutEngine::new(&layout)?;
         let size = window.inner_size();
         let instance = wgpu::Instance::default();
         let surface = instance.create_surface(window.clone())?;
@@ -140,7 +145,7 @@ impl State {
             queue,
             config,
             pipeline,
-            layout,
+            layout_engine,
         })
     }
 
@@ -156,7 +161,17 @@ impl State {
     fn render(&mut self) -> Result<(), wgpu::SurfaceError> {
         let window_width = self.config.width.max(1) as f32;
         let window_height = self.config.height.max(1) as f32;
-        let vertices = build_layout_vertices(&self.layout, window_width, window_height);
+        let rects = match self
+            .layout_engine
+            .compute_layout(window_width, window_height)
+        {
+            Ok(rects) => rects,
+            Err(err) => {
+                info!("layout compute error: {err:?}");
+                return Ok(());
+            }
+        };
+        let vertices = build_layout_vertices(&rects, window_width, window_height);
         let vertex_buffer = self
             .device
             .create_buffer_init(&wgpu::util::BufferInitDescriptor {
@@ -264,69 +279,17 @@ fn load_layout() -> Result<LayoutDocument> {
     Ok(doc)
 }
 
-fn build_layout_vertices(doc: &LayoutDocument, width: f32, height: f32) -> Vec<Vertex> {
+fn build_layout_vertices(rects: &[(ComponentKind, Rect)], width: f32, height: f32) -> Vec<Vertex> {
     let mut vertices = Vec::new();
-    let mut top_offset = 0.0;
-    let mut bottom_offset = 0.0;
-
-    let mut menu_nodes = Vec::new();
-    let mut overlay_nodes = Vec::new();
-    let mut pane_nodes = Vec::new();
-
-    for node in &doc.nodes {
-        match node.component {
-            layout::ComponentKind::MenuBar => menu_nodes.push(node),
-            layout::ComponentKind::OverlayRegion => overlay_nodes.push(node),
-            layout::ComponentKind::TerminalPane => pane_nodes.push(node),
-            layout::ComponentKind::Unknown => {}
-        }
-    }
-
-    for _node in menu_nodes {
-        let rect = Rect {
-            x: 0.0,
-            y: top_offset,
-            width,
-            height: MENU_BAR_HEIGHT,
+    for (component, rect) in rects {
+        let color = match component {
+            ComponentKind::MenuBar => [0.3, 0.3, 0.35],
+            ComponentKind::OverlayRegion => [0.25, 0.65, 0.25],
+            ComponentKind::TerminalPane => [0.15, 0.35, 0.65],
+            ComponentKind::Unknown => [0.2, 0.2, 0.2],
         };
-        push_rect(&mut vertices, rect, [0.3, 0.3, 0.35], width, height);
-        top_offset += MENU_BAR_HEIGHT;
+        push_rect(&mut vertices, *rect, color, width, height);
     }
-
-    for _node in overlay_nodes.iter().rev() {
-        let rect = Rect {
-            x: 0.0,
-            y: height - bottom_offset - OVERLAY_HEIGHT,
-            width,
-            height: OVERLAY_HEIGHT,
-        };
-        push_rect(&mut vertices, rect, [0.25, 0.65, 0.25], width, height);
-        bottom_offset += OVERLAY_HEIGHT;
-    }
-
-    let available = (height - top_offset - bottom_offset).max(0.0);
-    if !pane_nodes.is_empty() {
-        let total_grow: f32 = pane_nodes.iter().map(|n| n.layout.flex_grow.max(0.0)).sum();
-        let fallback_ratio = 1.0 / pane_nodes.len() as f32;
-        let mut current_y = top_offset;
-        for node in pane_nodes.iter() {
-            let ratio = if total_grow > 0.0 {
-                node.layout.flex_grow.max(0.0) / total_grow
-            } else {
-                fallback_ratio
-            };
-            let rect_height = (available * ratio).max(0.0);
-            let rect = Rect {
-                x: 0.0,
-                y: current_y,
-                width,
-                height: rect_height,
-            };
-            push_rect(&mut vertices, rect, [0.15, 0.35, 0.65], width, height);
-            current_y += rect_height;
-        }
-    }
-
     vertices
 }
 
@@ -371,4 +334,100 @@ fn push_rect(vertices: &mut Vec<Vertex>, rect: Rect, color: [f32; 3], width: f32
     };
 
     vertices.extend_from_slice(&[v0, v1, v2, v0, v2, v3]);
+}
+
+struct LayoutEngine {
+    taffy: Taffy,
+    root: Node,
+    nodes: Vec<NodeInfo>,
+}
+
+struct NodeInfo {
+    component: ComponentKind,
+    node: Node,
+}
+
+impl LayoutEngine {
+    fn new(doc: &LayoutDocument) -> Result<Self> {
+        let mut taffy = Taffy::new();
+        let mut nodes = Vec::new();
+        for node in &doc.nodes {
+            let style = style_from_layout_node(node);
+            let handle = taffy.new_leaf(style)?;
+            nodes.push(NodeInfo {
+                component: node.component,
+                node: handle,
+            });
+        }
+        let children: Vec<Node> = nodes.iter().map(|n| n.node).collect();
+        let root_style = Style {
+            size: Size {
+                width: Dimension::Percent(1.0),
+                height: Dimension::Percent(1.0),
+            },
+            flex_direction: TaffyFlexDirection::Column,
+            ..Default::default()
+        };
+        let root = taffy.new_with_children(root_style, &children)?;
+        Ok(Self { taffy, root, nodes })
+    }
+
+    fn compute_layout(&mut self, width: f32, height: f32) -> Result<Vec<(ComponentKind, Rect)>> {
+        self.taffy.compute_layout(
+            self.root,
+            Size {
+                width: AvailableSpace::Definite(width),
+                height: AvailableSpace::Definite(height),
+            },
+        )?;
+        let mut rects = Vec::new();
+        for info in &self.nodes {
+            let layout = self.taffy.layout(info.node)?;
+            rects.push((
+                info.component,
+                Rect {
+                    x: layout.location.x,
+                    y: layout.location.y,
+                    width: layout.size.width,
+                    height: layout.size.height,
+                },
+            ));
+        }
+        Ok(rects)
+    }
+}
+
+fn style_from_layout_node(node: &LayoutNode) -> Style {
+    match node.component {
+        ComponentKind::MenuBar => Style {
+            size: Size {
+                width: Dimension::Percent(1.0),
+                height: Dimension::Points(MENU_BAR_HEIGHT),
+            },
+            ..Default::default()
+        },
+        ComponentKind::OverlayRegion => Style {
+            position: Position::Absolute,
+            inset: TaffyRect {
+                left: LengthPercentageAuto::Auto,
+                right: LengthPercentageAuto::Auto,
+                top: LengthPercentageAuto::Auto,
+                bottom: LengthPercentageAuto::Points(0.0),
+            },
+            size: Size {
+                width: Dimension::Percent(1.0),
+                height: Dimension::Points(OVERLAY_HEIGHT),
+            },
+            ..Default::default()
+        },
+        ComponentKind::TerminalPane => Style {
+            flex_grow: node.layout.flex_grow,
+            size: Size {
+                width: Dimension::Percent(1.0),
+                height: Dimension::Auto,
+            },
+            ..Default::default()
+        },
+        ComponentKind::Unknown => Style::DEFAULT,
+    }
 }
