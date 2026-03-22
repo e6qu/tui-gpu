@@ -1,6 +1,7 @@
 [workspace]
 members = [
     "crates/render-app",
-    "crates/layout-compiler"
+    "crates/layout-compiler",
+    "crates/runtime-core"
 ]
 resolver = "2"
