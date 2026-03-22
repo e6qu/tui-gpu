@@ -4,20 +4,24 @@ use nix::sys::signal::{kill, Signal};
 use nix::sys::wait::{waitpid, WaitPidFlag};
 use nix::unistd::{close, dup2, execvp, fork, setsid, ForkResult, Pid};
 use std::ffi::CString;
-use std::fs::File;
 use std::io::{Read, Write};
 use std::os::fd::{FromRawFd, IntoRawFd, RawFd};
+use vte::{Params, Parser, Perform};
+
+const READ_CHUNK: usize = 4096;
 
 pub struct TerminalSession {
-    master: File,
+    master: std::fs::File,
     child: Pid,
+    parser: Parser,
+    buffer: TerminalBuffer,
 }
 
 impl TerminalSession {
-    pub fn spawn(command: &str, cols: u16, rows: u16) -> Result<Self> {
+    pub fn spawn(command: &str, cols: usize, rows: usize) -> Result<Self> {
         let winsize = Winsize {
-            ws_row: rows,
-            ws_col: cols,
+            ws_row: rows as u16,
+            ws_col: cols as u16,
             ws_xpixel: 0,
             ws_ypixel: 0,
         };
@@ -28,10 +32,12 @@ impl TerminalSession {
         match unsafe { fork().context("fork failed")? } {
             ForkResult::Parent { child } => {
                 close(slave_fd).ok();
-                let master_file = unsafe { File::from_raw_fd(master_fd) };
+                let master = unsafe { std::fs::File::from_raw_fd(master_fd) };
                 Ok(Self {
-                    master: master_file,
+                    master,
                     child,
+                    parser: Parser::new(),
+                    buffer: TerminalBuffer::new(rows, cols),
                 })
             }
             ForkResult::Child => {
@@ -43,12 +49,26 @@ impl TerminalSession {
         }
     }
 
-    pub fn read_all(&mut self) -> Result<Vec<u8>> {
-        let mut buf = Vec::new();
-        self.master
-            .read_to_end(&mut buf)
-            .context("read master pty failed")?;
-        Ok(buf)
+    pub fn process_output(&mut self) -> Result<()> {
+        let mut buf = [0u8; READ_CHUNK];
+        loop {
+            match self.master.read(&mut buf) {
+                Ok(0) => break,
+                Ok(n) => {
+                    let mut performer = Emulator {
+                        buffer: &mut self.buffer,
+                    };
+                    self.parser.advance(&mut performer, &buf[..n]);
+                }
+                Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => break,
+                Err(e) => return Err(e.into()),
+            }
+        }
+        Ok(())
+    }
+
+    pub fn snapshot_text(&self) -> String {
+        self.buffer.to_string()
     }
 
     pub fn write(&mut self, data: &[u8]) -> Result<()> {
@@ -87,6 +107,144 @@ fn child_exec(master: RawFd, slave: RawFd, command: &str) -> Result<()> {
     Ok(())
 }
 
+struct Emulator<'a> {
+    buffer: &'a mut TerminalBuffer,
+}
+
+impl<'a> Perform for Emulator<'a> {
+    fn print(&mut self, c: char) {
+        self.buffer.print(c);
+    }
+
+    fn execute(&mut self, byte: u8) {
+        match byte {
+            b'\n' => self.buffer.newline(),
+            b'\r' => self.buffer.carriage_return(),
+            b'\t' => self.buffer.tab(),
+            0x08 => self.buffer.backspace(),
+            _ => {}
+        }
+    }
+
+    fn hook(&mut self, _params: &Params, _intermediates: &[u8], _ignore: bool, _action: char) {}
+    fn put(&mut self, _byte: u8) {}
+    fn unhook(&mut self) {}
+
+    fn csi_dispatch(
+        &mut self,
+        params: &Params,
+        _intermediates: &[u8],
+        _ignore: bool,
+        action: char,
+    ) {
+        match action {
+            'H' | 'f' => {
+                let row = params
+                    .iter()
+                    .next()
+                    .and_then(|p| p.first())
+                    .copied()
+                    .unwrap_or(1) as usize;
+                let col = params
+                    .iter()
+                    .nth(1)
+                    .and_then(|p| p.first())
+                    .copied()
+                    .unwrap_or(1) as usize;
+                self.buffer
+                    .move_cursor(row.saturating_sub(1), col.saturating_sub(1));
+            }
+            'J' => self.buffer.clear(),
+            _ => {}
+        }
+    }
+}
+
+#[derive(Clone, Debug)]
+pub struct TerminalBuffer {
+    rows: usize,
+    cols: usize,
+    cursor_row: usize,
+    cursor_col: usize,
+    cells: Vec<char>,
+}
+
+impl TerminalBuffer {
+    fn new(rows: usize, cols: usize) -> Self {
+        Self {
+            rows,
+            cols,
+            cursor_row: 0,
+            cursor_col: 0,
+            cells: vec![' '; rows * cols],
+        }
+    }
+
+    fn index(&self, row: usize, col: usize) -> usize {
+        row * self.cols + col
+    }
+
+    fn set_cell(&mut self, row: usize, col: usize, ch: char) {
+        if row < self.rows && col < self.cols {
+            let idx = self.index(row, col);
+            self.cells[idx] = ch;
+        }
+    }
+
+    fn print(&mut self, ch: char) {
+        self.set_cell(self.cursor_row, self.cursor_col, ch);
+        self.cursor_col += 1;
+        if self.cursor_col >= self.cols {
+            self.newline();
+        }
+    }
+
+    fn newline(&mut self) {
+        self.cursor_col = 0;
+        if self.cursor_row + 1 >= self.rows {
+            self.scroll_up();
+        } else {
+            self.cursor_row += 1;
+        }
+    }
+
+    fn carriage_return(&mut self) {
+        self.cursor_col = 0;
+    }
+
+    fn backspace(&mut self) {
+        if self.cursor_col > 0 {
+            self.cursor_col -= 1;
+        }
+    }
+
+    fn tab(&mut self) {
+        let next_tab = ((self.cursor_col / 8) + 1) * 8;
+        self.cursor_col = next_tab.min(self.cols.saturating_sub(1));
+    }
+
+    fn move_cursor(&mut self, row: usize, col: usize) {
+        self.cursor_row = row.min(self.rows.saturating_sub(1));
+        self.cursor_col = col.min(self.cols.saturating_sub(1));
+    }
+
+    fn clear(&mut self) {
+        self.cells.fill(' ');
+        self.cursor_row = 0;
+        self.cursor_col = 0;
+    }
+
+    fn scroll_up(&mut self) {
+        let line = self.cols;
+        self.cells.drain(0..line);
+        self.cells.extend(std::iter::repeat(' ').take(line));
+    }
+
+    fn to_string(&self) -> String {
+        self.cells.iter().collect()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -94,10 +252,10 @@ mod tests {
     use std::time::Duration;
 
     #[test]
-    fn spawn_and_read_output() {
-        let mut session = TerminalSession::spawn("printf test", 80, 24).unwrap();
+    fn spawn_and_capture_text() {
+        let mut session = TerminalSession::spawn("printf hello", 40, 5).unwrap();
         thread::sleep(Duration::from_millis(100));
-        let buf = session.read_all().unwrap();
-        assert!(String::from_utf8_lossy(&buf).contains("test"));
+        session.process_output().unwrap();
+        assert!(session.snapshot_text().contains("hello"));
     }
 }

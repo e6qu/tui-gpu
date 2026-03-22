@@ -1,7 +1,5 @@
 ## PLAN
-1. Integrate `alacritty_terminal` as our terminal core:
-   - Wire PTY output into `alacritty_terminal`’s grid, expose snapshots, unit tests.
-2. Render terminal buffer in renderer (glyph cache + text drawing).
-3. Enhance layout compiler (nested nodes/z-order) feeding Taffy tree.
-4. Build runtime event bus/API + tests.
-5. Add CI + visual smoke tests (tmux/screenshots).
+1. Wire the new VT buffer into the renderer (glyph cache + text rendering inside pane rectangles).
+2. Extend layout compiler (nested nodes/z-order) feeding the Taffy tree directly.
+3. Build runtime event bus/API with tests (REST/WebSocket adapters).
+4. Add CI + visual smoke tests (tmux/screenshots) for regressions.
